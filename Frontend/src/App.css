@@ -432,6 +432,17 @@ select:focus {
   cursor: pointer;
 }
 
+.ghost.danger {
+  border-color: #f9d3d7;
+  color: #b42318;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
 .feedback {
   padding: 0.85rem 1rem;
   border-radius: 12px;

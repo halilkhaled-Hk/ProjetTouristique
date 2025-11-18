@@ -715,6 +715,7 @@ function AdminDashboard({ token, onLogout }) {
   const [feedback, setFeedback] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({});
+  const [editingItem, setEditingItem] = useState(null);
 
   const apiCall = useCallback(async (endpoint, options = {}) => {
     const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -851,12 +852,37 @@ function AdminDashboard({ token, onLogout }) {
     }
   }, [feedback]);
 
-  const handleSubmit = async (endpoint, data) => {
+  const closeForm = () => {
+    setShowForm(false);
+    setFormData({});
+    setEditingItem(null);
+  };
+
+  const openFormForCreate = (defaults = {}) => {
+    setFormData(defaults);
+    setEditingItem(null);
+    setShowForm(true);
+  };
+
+  const handleSubmit = async (endpoint, data, method = 'POST') => {
     try {
-      await apiCall(endpoint, { method: 'POST', body: JSON.stringify(data) });
-      setFeedback({ type: 'success', text: 'Création réussie !' });
-      setShowForm(false);
-      setFormData({});
+      await apiCall(endpoint, { method, body: JSON.stringify(data) });
+      setFeedback({ type: 'success', text: method === 'POST' ? 'Création réussie !' : 'Mise à jour réussie !' });
+      closeForm();
+      fetchData(activeTab);
+    } catch (error) {
+      setFeedback({ type: 'error', text: error.message });
+    }
+  };
+
+  const handleDelete = async (endpoint, successMessage = 'Élément supprimé.') => {
+    if (typeof window !== 'undefined') {
+      const confirmDelete = window.confirm('Confirmer la suppression ?');
+      if (!confirmDelete) return;
+    }
+    try {
+      await apiCall(endpoint, { method: 'DELETE' });
+      setFeedback({ type: 'success', text: successMessage });
       fetchData(activeTab);
     } catch (error) {
       setFeedback({ type: 'error', text: error.message });
@@ -944,6 +970,61 @@ function AdminDashboard({ token, onLogout }) {
                 <div className="section-heading">
                   <h2>Historique des réservations</h2>
                 </div>
+                {showForm && activeTab === 'reservations' && (
+                  <div className="admin-form">
+                    <h3>Modifier la réservation</h3>
+                    <p style={{ marginTop: '-0.5rem', color: '#5b618a' }}>
+                      {editingItem?.first_name} {editingItem?.last_name} — {editingItem?.origin} → {editingItem?.destination}
+                    </p>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleSubmit(
+                          `/api/admin/reservations/${formData.id}`,
+                          {
+                            status: formData.status,
+                            payment_method: formData.payment_method
+                          },
+                          'PUT'
+                        );
+                      }}
+                    >
+                      <label>
+                        Statut
+                        <select
+                          required
+                          value={formData.status || 'ACTIVE'}
+                          onChange={(event) => setFormData({ ...formData, status: event.target.value })}
+                        >
+                          <option value="ACTIVE">ACTIVE</option>
+                          <option value="CANCELLED">CANCELLED</option>
+                        </select>
+                      </label>
+                      <label>
+                        Mode de paiement
+                        <select
+                          required
+                          value={formData.payment_method || PAYMENT_METHODS[0]}
+                          onChange={(event) => setFormData({ ...formData, payment_method: event.target.value })}
+                        >
+                          {PAYMENT_METHODS.map((method) => (
+                            <option key={method} value={method}>
+                              {method}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="form-actions">
+                        <button type="submit" className="primary">
+                          Mettre à jour
+                        </button>
+                        <button type="button" className="ghost" onClick={closeForm}>
+                          Annuler
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
                 {reservations.length === 0 ? (
                   <p>Aucune réservation pour le moment.</p>
                 ) : (
@@ -957,6 +1038,7 @@ function AdminDashboard({ token, onLogout }) {
                           <th>Contact</th>
                           <th>Paiement</th>
                           <th>Statut</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -982,6 +1064,32 @@ function AdminDashboard({ token, onLogout }) {
                             <td>
                               <span className={`badge status-${item.status.toLowerCase()}`}>{item.status}</span>
                             </td>
+                            <td>
+                              <div className="action-buttons">
+                                <button
+                                  className="ghost"
+                                  onClick={() => {
+                                    setEditingItem(item);
+                                    setFormData({
+                                      id: item.id,
+                                      status: item.status,
+                                      payment_method: item.payment_method
+                                    });
+                                    setShowForm(true);
+                                  }}
+                                >
+                                  Modifier
+                                </button>
+                                <button
+                                  className="ghost danger"
+                                  onClick={() =>
+                                    handleDelete(`/api/admin/reservations/${item.id}`, 'Réservation supprimée.')
+                                  }
+                                >
+                                  Supprimer
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -995,7 +1103,7 @@ function AdminDashboard({ token, onLogout }) {
               <div className="admin-table">
                 <div className="section-heading">
                   <h2>Gestion des voyages - Attribution bus et chauffeur</h2>
-                  <button className="primary" onClick={() => setShowForm(true)}>
+                  <button className="primary" onClick={() => openFormForCreate({})}>
                     + Attribuer un bus et chauffeur
                   </button>
                 </div>
@@ -1198,7 +1306,7 @@ function AdminDashboard({ token, onLogout }) {
                         <button type="submit" className="primary">
                           Créer
                         </button>
-                        <button type="button" className="ghost" onClick={() => { setShowForm(false); setFormData({}); }}>
+                        <button type="button" className="ghost" onClick={closeForm}>
                           Annuler
                         </button>
                       </div>
@@ -1274,17 +1382,21 @@ function AdminDashboard({ token, onLogout }) {
               <div className="admin-table">
                 <div className="section-heading">
                   <h2>Agences</h2>
-                  <button className="primary" onClick={() => setShowForm(true)}>
+                  <button className="primary" onClick={() => openFormForCreate({})}>
                     + Nouvelle agence
                   </button>
                 </div>
                 {showForm && (
                   <div className="admin-form">
-                    <h3>Créer une agence</h3>
+                    <h3>{editingItem ? 'Modifier l’agence' : 'Créer une agence'}</h3>
                     <form
                       onSubmit={(e) => {
                         e.preventDefault();
-                        handleSubmit('/api/admin/agences', formData);
+                        if (editingItem) {
+                          handleSubmit(`/api/admin/agences/${editingItem.id_agence}`, formData, 'PUT');
+                        } else {
+                          handleSubmit('/api/admin/agences', formData);
+                        }
                       }}
                     >
                       <label>
@@ -1327,9 +1439,9 @@ function AdminDashboard({ token, onLogout }) {
                       </label>
                       <div className="form-actions">
                         <button type="submit" className="primary">
-                          Créer
+                          {editingItem ? 'Mettre à jour' : 'Créer'}
                         </button>
-                        <button type="button" className="ghost" onClick={() => { setShowForm(false); setFormData({}); }}>
+                        <button type="button" className="ghost" onClick={closeForm}>
                           Annuler
                         </button>
                       </div>
@@ -1347,6 +1459,7 @@ function AdminDashboard({ token, onLogout }) {
                           <th>Ville</th>
                           <th>Adresse</th>
                           <th>Contact</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1358,6 +1471,34 @@ function AdminDashboard({ token, onLogout }) {
                             <td>
                               {item.tel_agence && <div>{item.tel_agence}</div>}
                               {item.email_agence && <div>{item.email_agence}</div>}
+                            </td>
+                            <td>
+                              <div className="action-buttons">
+                                <button
+                                  className="ghost"
+                                  onClick={() => {
+                                    setEditingItem(item);
+                                    setFormData({
+                                      nom_agence: item.nom_agence,
+                                      ville_agence: item.ville_agence,
+                                      adresse_agence: item.adresse_agence || '',
+                                      tel_agence: item.tel_agence || '',
+                                      email_agence: item.email_agence || ''
+                                    });
+                                    setShowForm(true);
+                                  }}
+                                >
+                                  Modifier
+                                </button>
+                                <button
+                                  className="ghost danger"
+                                  onClick={() =>
+                                    handleDelete(`/api/admin/agences/${item.id_agence}`, 'Agence supprimée.')
+                                  }
+                                >
+                                  Supprimer
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1372,17 +1513,21 @@ function AdminDashboard({ token, onLogout }) {
               <div className="admin-table">
                 <div className="section-heading">
                   <h2>Véhicules</h2>
-                  <button className="primary" onClick={() => setShowForm(true)}>
+                  <button className="primary" onClick={() => openFormForCreate({ statut: 'ACTIF' })}>
                     + Nouveau véhicule
                   </button>
                 </div>
                 {showForm && (
                   <div className="admin-form">
-                    <h3>Créer un véhicule</h3>
+                    <h3>{editingItem ? 'Modifier le véhicule' : 'Créer un véhicule'}</h3>
                     <form
                       onSubmit={(e) => {
                         e.preventDefault();
-                        handleSubmit('/api/admin/vehicules', formData);
+                        if (editingItem) {
+                          handleSubmit(`/api/admin/vehicules/${editingItem.id_vehicule}`, formData, 'PUT');
+                        } else {
+                          handleSubmit('/api/admin/vehicules', formData);
+                        }
                       }}
                     >
                       <label>
@@ -1458,9 +1603,9 @@ function AdminDashboard({ token, onLogout }) {
                       </label>
                       <div className="form-actions">
                         <button type="submit" className="primary">
-                          Créer
+                          {editingItem ? 'Mettre à jour' : 'Créer'}
                         </button>
-                        <button type="button" className="ghost" onClick={() => { setShowForm(false); setFormData({}); }}>
+                        <button type="button" className="ghost" onClick={closeForm}>
                           Annuler
                         </button>
                       </div>
@@ -1480,6 +1625,7 @@ function AdminDashboard({ token, onLogout }) {
                           <th>Marque</th>
                           <th>Agence</th>
                           <th>Statut</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1494,6 +1640,37 @@ function AdminDashboard({ token, onLogout }) {
                               <span className={`badge status-${item.statut.toLowerCase().replace('_', '-')}`}>
                                 {item.statut}
                               </span>
+                            </td>
+                            <td>
+                              <div className="action-buttons">
+                                <button
+                                  className="ghost"
+                                  onClick={() => {
+                                    setEditingItem(item);
+                                    setFormData({
+                                      type_vehicule: item.type_vehicule,
+                                      immatriculation: item.immatriculation,
+                                      nombre_places: item.nombre_places,
+                                      marque: item.marque || '',
+                                      designation: item.designation || '',
+                                      image_url: item.image_url || '',
+                                      statut: item.statut,
+                                      id_agence: item.id_agence || ''
+                                    });
+                                    setShowForm(true);
+                                  }}
+                                >
+                                  Modifier
+                                </button>
+                                <button
+                                  className="ghost danger"
+                                  onClick={() =>
+                                    handleDelete(`/api/admin/vehicules/${item.id_vehicule}`, 'Véhicule supprimé.')
+                                  }
+                                >
+                                  Supprimer
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1758,7 +1935,99 @@ function AdminDashboard({ token, onLogout }) {
               <div className="admin-table">
                 <div className="section-heading">
                   <h2>Mécaniciens disponibles</h2>
+                  <button className="primary" onClick={() => openFormForCreate({ actif: 1 })}>
+                    + Nouveau mécanicien
+                  </button>
                 </div>
+                {showForm && (
+                  <div className="admin-form">
+                    <h3>{editingItem ? 'Modifier le mécanicien' : 'Ajouter un mécanicien'}</h3>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const payload = {
+                          nom: formData.nom,
+                          prenom: formData.prenom,
+                          email: formData.email || null,
+                          telephone: formData.telephone || null,
+                          date_naissance: formData.date_naissance || null,
+                          specialite: formData.specialite || null,
+                          actif: formData.actif ? 1 : 0
+                        };
+                        if (editingItem) {
+                          handleSubmit(`/api/admin/mecaniciens/${editingItem.id_employe}`, payload, 'PUT');
+                        } else {
+                          handleSubmit('/api/admin/employes', { ...payload, poste: 'Mecanicien' });
+                        }
+                      }}
+                    >
+                      <div className="inline-fields">
+                        <label>
+                          Nom *
+                          <input
+                            required
+                            value={formData.nom || ''}
+                            onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
+                          />
+                        </label>
+                        <label>
+                          Prénom *
+                          <input
+                            required
+                            value={formData.prenom || ''}
+                            onChange={(e) => setFormData({ ...formData, prenom: e.target.value })}
+                          />
+                        </label>
+                      </div>
+                      <label>
+                        Email
+                        <input
+                          type="email"
+                          value={formData.email || ''}
+                          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        />
+                      </label>
+                      <label>
+                        Téléphone
+                        <input
+                          value={formData.telephone || ''}
+                          onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
+                        />
+                      </label>
+                      <label>
+                        Date de naissance
+                        <input
+                          type="date"
+                          value={formData.date_naissance || ''}
+                          onChange={(e) => setFormData({ ...formData, date_naissance: e.target.value })}
+                        />
+                      </label>
+                      <label>
+                        Spécialité
+                        <input
+                          value={formData.specialite || ''}
+                          onChange={(e) => setFormData({ ...formData, specialite: e.target.value })}
+                        />
+                      </label>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={formData.actif !== undefined ? !!formData.actif : true}
+                          onChange={(e) => setFormData({ ...formData, actif: e.target.checked })}
+                        />
+                        Actif
+                      </label>
+                      <div className="form-actions">
+                        <button type="submit" className="primary">
+                          {editingItem ? 'Mettre à jour' : 'Créer'}
+                        </button>
+                        <button type="button" className="ghost" onClick={closeForm}>
+                          Annuler
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
                 {mecaniciens.length === 0 ? (
                   <p>Aucun mécanicien actif.</p>
                 ) : (
@@ -1770,6 +2039,7 @@ function AdminDashboard({ token, onLogout }) {
                           <th>Prénom</th>
                           <th>Spécialité</th>
                           <th>Contact</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1781,6 +2051,36 @@ function AdminDashboard({ token, onLogout }) {
                             <td>
                               {item.email && <div>{item.email}</div>}
                               {item.telephone && <div>{item.telephone}</div>}
+                            </td>
+                            <td>
+                              <div className="action-buttons">
+                                <button
+                                  className="ghost"
+                                  onClick={() => {
+                                    setEditingItem(item);
+                                    setFormData({
+                                      nom: item.nom,
+                                      prenom: item.prenom,
+                                      email: item.email || '',
+                                      telephone: item.telephone || '',
+                                      date_naissance: item.date_naissance ? item.date_naissance.slice(0, 10) : '',
+                                      specialite: item.specialite || '',
+                                      actif: item.actif
+                                    });
+                                    setShowForm(true);
+                                  }}
+                                >
+                                  Modifier
+                                </button>
+                                <button
+                                  className="ghost danger"
+                                  onClick={() =>
+                                    handleDelete(`/api/admin/mecaniciens/${item.id_employe}`, 'Mécanicien supprimé.')
+                                  }
+                                >
+                                  Supprimer
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}

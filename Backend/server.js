@@ -372,6 +372,130 @@ app.get('/api/admin/reservations', authenticateAdmin, async (_req, res) => {
   }
 });
 
+app.put('/api/admin/reservations/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { status, payment_method } = req.body;
+  if (!status || !payment_method) {
+    return res.status(400).json({ message: 'Statut et mode de paiement requis.' });
+  }
+  if (!['ACTIVE', 'CANCELLED'].includes(status)) {
+    return res.status(400).json({ message: 'Statut invalide.' });
+  }
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [reservationRows] = await connection.query(
+      `SELECT r.*, t.id AS trip_ref_id, t.departure_time
+       FROM reservations r
+       INNER JOIN trips t ON r.trip_id = t.id
+       WHERE r.id = ? FOR UPDATE`,
+      [id]
+    );
+    if (!reservationRows.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Réservation introuvable.' });
+    }
+    const reservation = reservationRows[0];
+
+    if (status !== reservation.status) {
+      const [tripRows] = await connection.query('SELECT * FROM trips WHERE id = ? FOR UPDATE', [
+        reservation.trip_id
+      ]);
+      const trip = tripRows[0];
+      if (!trip) {
+        await connection.rollback();
+        return res.status(404).json({ message: 'Trajet introuvable.' });
+      }
+      const travelDate = reservation.travel_date instanceof Date ? reservation.travel_date : new Date(reservation.travel_date);
+      const mysqlDate = travelDate.toISOString().split('T')[0];
+      const departureDateTime = new Date(`${mysqlDate}T${reservation.departure_time}`);
+
+      if (status === 'ACTIVE' && reservation.status === 'CANCELLED') {
+        if (departureDateTime <= new Date()) {
+          await connection.rollback();
+          return res.status(400).json({ message: 'Impossible de réactiver une réservation pour un départ passé.' });
+        }
+        if (trip.seats_available <= 0) {
+          await connection.rollback();
+          return res.status(400).json({ message: 'Plus aucune place disponible sur ce voyage.' });
+        }
+        await connection.query('UPDATE trips SET seats_available = seats_available - 1 WHERE id = ?', [
+          reservation.trip_id
+        ]);
+      } else if (status === 'CANCELLED' && reservation.status === 'ACTIVE') {
+        await connection.query(
+          'UPDATE trips SET seats_available = LEAST(seats_total, seats_available + 1) WHERE id = ?',
+          [reservation.trip_id]
+        );
+      }
+    }
+
+    await connection.query('UPDATE reservations SET status = ?, payment_method = ? WHERE id = ?', [
+      status,
+      payment_method,
+      id
+    ]);
+
+    const [rows] = await connection.query(
+      `SELECT r.id,
+              r.status,
+              r.payment_method,
+              r.price_paid,
+              r.travel_date,
+              r.created_at,
+              t.origin,
+              t.destination,
+              t.departure_time,
+              u.first_name,
+              u.last_name,
+              u.email,
+              u.phone_number
+       FROM reservations r
+       INNER JOIN trips t ON r.trip_id = t.id
+       INNER JOIN users u ON r.user_id = u.id
+       WHERE r.id = ?`,
+      [id]
+    );
+    await connection.commit();
+    res.json(rows[0]);
+  } catch (error) {
+    await connection.rollback();
+    console.error('Erreur mise à jour réservation admin:', error);
+    res.status(500).json({ message: 'Impossible de mettre à jour la réservation.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete('/api/admin/reservations/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.query('SELECT * FROM reservations WHERE id = ? FOR UPDATE', [id]);
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Réservation introuvable.' });
+    }
+    const reservation = rows[0];
+    await connection.query('DELETE FROM reservations WHERE id = ?', [id]);
+    if (reservation.status === 'ACTIVE') {
+      await connection.query(
+        'UPDATE trips SET seats_available = LEAST(seats_total, seats_available + 1) WHERE id = ?',
+        [reservation.trip_id]
+      );
+    }
+    await connection.commit();
+    res.json({ message: 'Réservation supprimée.' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Erreur suppression réservation admin:', error);
+    res.status(500).json({ message: 'Impossible de supprimer la réservation.' });
+  } finally {
+    connection.release();
+  }
+});
+
 // ========== GESTION AGENCES ==========
 app.get('/api/admin/agences', authenticateAdmin, async (_req, res) => {
   try {
@@ -398,6 +522,44 @@ app.post('/api/admin/agences', authenticateAdmin, async (req, res) => {
   } catch (error) {
     console.error('Erreur création agence:', error);
     res.status(500).json({ message: 'Impossible de créer l\'agence.' });
+  }
+});
+
+app.put('/api/admin/agences/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { nom_agence, adresse_agence, tel_agence, email_agence, ville_agence } = req.body;
+  if (!nom_agence || !ville_agence) {
+    return res.status(400).json({ message: 'Nom et ville de l\'agence requis.' });
+  }
+  try {
+    const [result] = await pool.query(
+      `UPDATE agences
+       SET nom_agence = ?, adresse_agence = ?, tel_agence = ?, email_agence = ?, ville_agence = ?
+       WHERE id_agence = ?`,
+      [nom_agence, adresse_agence || null, tel_agence || null, email_agence || null, ville_agence, id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Agence introuvable.' });
+    }
+    const [rows] = await pool.query('SELECT * FROM agences WHERE id_agence = ?', [id]);
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Erreur mise à jour agence:', error);
+    res.status(500).json({ message: 'Impossible de mettre à jour l\'agence.' });
+  }
+});
+
+app.delete('/api/admin/agences/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [result] = await pool.query('DELETE FROM agences WHERE id_agence = ?', [id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Agence introuvable.' });
+    }
+    res.json({ message: 'Agence supprimée.' });
+  } catch (error) {
+    console.error('Erreur suppression agence:', error);
+    res.status(500).json({ message: 'Impossible de supprimer l\'agence.' });
   }
 });
 
