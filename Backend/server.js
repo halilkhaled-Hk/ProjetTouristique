@@ -509,14 +509,35 @@ app.get('/api/admin/chauffeurs', authenticateAdmin, async (_req, res) => {
   }
 });
 
+// ========== GESTION MÉCANICIENS ==========
+app.get('/api/admin/mecaniciens', authenticateAdmin, async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT e.*, m.specialite
+       FROM employes e
+       INNER JOIN mecaniciens m ON e.id_employe = m.id_mecanicien
+       WHERE e.actif = 1
+       ORDER BY e.nom, e.prenom`
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Erreur récupération mécaniciens:', error);
+    res.status(500).json({ message: 'Impossible de charger les mécaniciens.' });
+  }
+});
+
 
 // ========== GESTION MAINTENANCES ==========
 app.get('/api/admin/maintenances', authenticateAdmin, async (req, res) => {
   const { id_vehicule } = req.query;
   try {
-    let query = `SELECT m.*, v.immatriculation, v.type_vehicule
+    let query = `SELECT m.*, 
+                        v.immatriculation, v.type_vehicule,
+                        e.nom AS mecanicien_nom, e.prenom AS mecanicien_prenom
                  FROM maintenances m
                  INNER JOIN vehicules v ON m.id_vehicule = v.id_vehicule
+                 LEFT JOIN mecaniciens me ON m.id_mecanicien = me.id_mecanicien
+                 LEFT JOIN employes e ON me.id_mecanicien = e.id_employe
                  WHERE 1=1`;
     const params = [];
     if (id_vehicule) {
@@ -533,18 +554,25 @@ app.get('/api/admin/maintenances', authenticateAdmin, async (req, res) => {
 });
 
 app.post('/api/admin/maintenances', authenticateAdmin, async (req, res) => {
-  const { id_vehicule, type_maintenance, description_travaux, zone_intervention, date_fin } = req.body;
+  const { id_vehicule, id_mecanicien, type_maintenance, description_travaux, zone_intervention, date_fin } = req.body;
   if (!id_vehicule || !type_maintenance) {
     return res.status(400).json({ message: 'Véhicule et type de maintenance requis.' });
   }
   try {
     const [result] = await pool.query(
-      'INSERT INTO maintenances (id_vehicule, type_maintenance, description_travaux, zone_intervention, date_fin) VALUES (?, ?, ?, ?, ?)',
-      [id_vehicule, type_maintenance, description_travaux || null, zone_intervention || null, date_fin || null]
+      'INSERT INTO maintenances (id_vehicule, id_mecanicien, type_maintenance, description_travaux, zone_intervention, date_fin) VALUES (?, ?, ?, ?, ?, ?)',
+      [id_vehicule, id_mecanicien || null, type_maintenance, description_travaux || null, zone_intervention || null, date_fin || null]
     );
     await pool.query('UPDATE vehicules SET statut = ? WHERE id_vehicule = ?', ['EN_MAINTENANCE', id_vehicule]);
     const [rows] = await pool.query(
-      `SELECT m.*, v.immatriculation FROM maintenances m INNER JOIN vehicules v ON m.id_vehicule = v.id_vehicule WHERE m.id_maintenance = ?`,
+      `SELECT m.*, 
+              v.immatriculation, v.type_vehicule,
+              e.nom AS mecanicien_nom, e.prenom AS mecanicien_prenom
+       FROM maintenances m 
+       INNER JOIN vehicules v ON m.id_vehicule = v.id_vehicule
+       LEFT JOIN mecaniciens me ON m.id_mecanicien = me.id_mecanicien
+       LEFT JOIN employes e ON me.id_mecanicien = e.id_employe
+       WHERE m.id_maintenance = ?`,
       [result.insertId]
     );
     res.status(201).json(rows[0]);

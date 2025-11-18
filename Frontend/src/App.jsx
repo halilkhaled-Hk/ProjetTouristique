@@ -676,7 +676,6 @@ function Dashboard({ user, onLogout, searchParams, onResetSearch }) {
             </p>
             <p className="booking-time">{formatTime(bookingTrip.departure_time)}</p>
             <p className="booking-price">Total : {formatPrice(bookingTrip.price)}</p>
-
             <label>
               Mode de paiement
               <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
@@ -706,6 +705,7 @@ function AdminDashboard({ token, onLogout }) {
   const [vehicules, setVehicules] = useState([]);
   const [employes, setEmployes] = useState([]);
   const [chauffeurs, setChauffeurs] = useState([]);
+  const [mecaniciens, setMecaniciens] = useState([]);
   const [maintenances, setMaintenances] = useState([]);
   const [partenaires, setPartenaires] = useState([]);
   const [filterDate, setFilterDate] = useState('');
@@ -784,6 +784,9 @@ function AdminDashboard({ token, onLogout }) {
         case 'chauffeurs':
           setChauffeurs(await apiCall('/api/admin/chauffeurs'));
           break;
+        case 'mecaniciens':
+          setMecaniciens(await apiCall('/api/admin/mecaniciens'));
+          break;
         case 'maintenances':
           setMaintenances(await apiCall('/api/admin/maintenances'));
           break;
@@ -831,10 +834,15 @@ function AdminDashboard({ token, onLogout }) {
     if (showForm && activeTab === 'vehicules' && agences.length === 0) {
       apiCall('/api/admin/agences').then(setAgences).catch(() => {});
     }
-    if (showForm && activeTab === 'maintenances' && vehicules.length === 0) {
-      apiCall('/api/admin/vehicules').then(setVehicules).catch(() => {});
+    if (showForm && activeTab === 'maintenances') {
+      if (vehicules.length === 0) {
+        apiCall('/api/admin/vehicules').then(setVehicules).catch(() => {});
+      }
+      if (mecaniciens.length === 0) {
+        apiCall('/api/admin/mecaniciens').then(setMecaniciens).catch(() => {});
+      }
     }
-  }, [showForm, activeTab, apiCall, agences.length, vehicules.length, chauffeurs.length, trips.length]);
+  }, [showForm, activeTab, apiCall, agences.length, vehicules.length, chauffeurs.length, trips.length, mecaniciens.length]);
 
   useEffect(() => {
     if (feedback) {
@@ -877,6 +885,7 @@ function AdminDashboard({ token, onLogout }) {
     { id: 'vehicules', label: 'Véhicules' },
     { id: 'employes', label: 'Employés' },
     { id: 'chauffeurs', label: 'Chauffeurs' },
+    { id: 'mecaniciens', label: 'Mécaniciens' },
     { id: 'maintenances', label: 'Maintenances' },
     { id: 'partenaires', label: 'Partenaires' }
   ];
@@ -1745,6 +1754,43 @@ function AdminDashboard({ token, onLogout }) {
               </div>
             )}
 
+            {activeTab === 'mecaniciens' && (
+              <div className="admin-table">
+                <div className="section-heading">
+                  <h2>Mécaniciens disponibles</h2>
+                </div>
+                {mecaniciens.length === 0 ? (
+                  <p>Aucun mécanicien actif.</p>
+                ) : (
+                  <div className="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Nom</th>
+                          <th>Prénom</th>
+                          <th>Spécialité</th>
+                          <th>Contact</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mecaniciens.map((item) => (
+                          <tr key={item.id_employe}>
+                            <td>{item.nom}</td>
+                            <td>{item.prenom}</td>
+                            <td>{item.specialite || '—'}</td>
+                            <td>
+                              {item.email && <div>{item.email}</div>}
+                              {item.telephone && <div>{item.telephone}</div>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'maintenances' && (
               <div className="admin-table">
                 <div className="section-heading">
@@ -1801,6 +1847,31 @@ function AdminDashboard({ token, onLogout }) {
                         />
                       </label>
                       <label>
+                        Mécanicien en charge
+                        <select
+                          value={formData.id_mecanicien || ''}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              id_mecanicien: e.target.value ? Number(e.target.value) : null
+                            })
+                          }
+                        >
+                          <option value="">Sélectionner (optionnel)</option>
+                          {mecaniciens.map((m) => (
+                            <option key={m.id_employe} value={m.id_employe}>
+                              {m.nom} {m.prenom} {m.specialite ? `(${m.specialite})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {mecaniciens.length === 0 && (
+                          <small style={{ display: 'block', marginTop: '0.25rem', color: '#a90f36' }}>
+                            Aucun mécanicien enregistré. Créez un employé avec le poste &quot;Mécanicien&quot; dans l&apos;onglet
+                            &quot;Employés&quot;.
+                          </small>
+                        )}
+                      </label>
+                      <label>
                         Date de fin (optionnel)
                         <input
                           type="datetime-local"
@@ -1828,6 +1899,7 @@ function AdminDashboard({ token, onLogout }) {
                         <tr>
                           <th>Véhicule</th>
                           <th>Type</th>
+                          <th>Mécanicien</th>
                           <th>Date début</th>
                           <th>Date fin</th>
                           <th>Zone</th>
@@ -1836,8 +1908,17 @@ function AdminDashboard({ token, onLogout }) {
                       <tbody>
                         {maintenances.map((item) => (
                           <tr key={item.id_maintenance}>
-                            <td>{item.immatriculation}</td>
+                            <td>
+                              {item.immatriculation}
+                              <br />
+                              <small>{item.type_vehicule}</small>
+                            </td>
                             <td>{item.type_maintenance}</td>
+                            <td>
+                              {item.mecanicien_nom
+                                ? `${item.mecanicien_nom} ${item.mecanicien_prenom || ''}`
+                                : '—'}
+                            </td>
                             <td>{new Date(item.date_debut).toLocaleString('fr-FR')}</td>
                             <td>{item.date_fin ? new Date(item.date_fin).toLocaleString('fr-FR') : 'En cours'}</td>
                             <td>{item.zone_intervention || '—'}</td>

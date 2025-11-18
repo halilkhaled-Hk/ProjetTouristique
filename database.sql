@@ -148,13 +148,16 @@ CREATE TABLE IF NOT EXISTS partenaires (
 CREATE TABLE IF NOT EXISTS maintenances (
   id_maintenance INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   id_vehicule INT UNSIGNED NOT NULL,
+  id_mecanicien INT UNSIGNED NULL,
   type_maintenance VARCHAR(256) NOT NULL,
   description_travaux TEXT,
   zone_intervention VARCHAR(256),
   date_debut DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   date_fin DATETIME NULL,
   FOREIGN KEY (id_vehicule) REFERENCES vehicules(id_vehicule)
-    ON UPDATE CASCADE ON DELETE RESTRICT
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  FOREIGN KEY (id_mecanicien) REFERENCES mecaniciens(id_mecanicien)
+    ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 -- Table gestion_trips (attribution véhicule et chauffeur aux trajets)
